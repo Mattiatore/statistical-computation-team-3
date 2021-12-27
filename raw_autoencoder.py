@@ -247,3 +247,45 @@ correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_
 dis_score = correct_prob
 print("Score: ", dis_score)
 
+################################
+# DHLA 
+###############################
+data = pd.read_csv("/home/pau/Desktop/MASTER/Statistical_computation/project4/final_dataset.csv")
+data = data.iloc[: , 1:]
+data = data.to_numpy()
+data = preprocessing.scale(data)
+
+rate = 2e-4
+input_width = data.shape[1]
+encoder_depth = 2
+encoder_size = [30, 20]
+n_circular_unit= 2
+n_logistic_unit= 0
+n_linear_unit= 0
+n_linear_bypass= 3
+dropout_rate = 0
+nonlinear_reg = 1e-4
+linear_reg = 1e-4
+
+
+y = keras.Input(shape=(input_width,), name='input')
+x = encoder('encoder', encoder_size, nonlinear_reg, dropout_rate, 'tanh')(y)
+
+chest = []
+if n_linear_bypass > 0:
+    x_bypass = linear_bypass('bypass', n_linear_bypass, linear_reg)(y)
+    chest.append(x_bypass)
+if n_logistic_unit > 0:
+    x_logistic = logistic_unit('logistic', n_logistic_unit)(x)
+    chest.append(x_logistic)
+if n_linear_unit > 0:
+    x_linear = linear_unit('linear', n_linear_unit)(x)
+    chest.append(x_linear)
+if n_circular_unit > 0:
+    x_circular = circular_unit('circular')(x)
+    chest.append(x_circular)
+y_hat = decoder('decoder', input_width)(chest)
+model = keras.Model(outputs=y_hat, inputs=y)
+model.compile(loss='mean_squared_error',
+                           optimizer=keras.optimizers.Adam(rate))
+model.fit(data, data, epochs=100, verbose=1)
