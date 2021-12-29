@@ -86,7 +86,7 @@ data = data.to_numpy()
 data = preprocessing.scale(data)
 model = cyclum.tuning.CyclumAutoTune(data, max_linear_dims=5, 
                                      epochs=2000, rate=5e-4, verbose=100,
-                                     encoder_width=[30, 20])
+                                      encoder_width=[30, 20])
 
 model.train(data, epochs=1000, verbose=100, rate=2e-4)
 pseudotime = model.predict_pseudotime(data)
@@ -127,3 +127,36 @@ discrete_time, distr_g2m = cyclum.evaluation.periodic_parzen_estimate(flat_embed
 correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_g2m], cpt, ['g0/g1', 's', 'g2/m'])
 dis_score = correct_prob
 print("Score Cyclum: ", dis_score)
+
+import cyclum.illustration
+color_map = {"g0/g1": "red", "s": "green", "g2/m": "blue"}
+cyclum.illustration.plot_round_distr_color(pseudotime[:, 0], cpt.squeeze(), color_map)
+
+
+#####################
+# CHLA 9
+##################
+data = pd.read_csv("/home/pau/Desktop/MASTER/Statistical_computation/project4/final_dataset.csv")
+data = data.iloc[: , 1:]
+data = data.to_numpy()
+data = preprocessing.scale(data)
+
+model = cyclum.models.AutoEncoder(input_width=data.shape[1],
+                                  encoder_width=[600, 300, 200, 100, 50, 20], 
+                                  encoder_depth=6,
+                                  n_circular_unit=2,
+                                  n_logistic_unit=0,
+                                  n_linear_unit=5,
+                                  n_linear_bypass=3,
+                                  dropout_rate=0.1)
+model.train(data, epochs=20, verbose=10, rate=2e-4)
+
+
+pseudotime = model.predict_pseudotime(data)
+pseudotime = (pseudotime % (2 * np.pi)) / 2
+pseudotime = pseudotime[:, 0]
+label = np.array([0 for p in pseudotime if p < 1.5] )
+import seaborn as sns
+sns.distplot(pseudotime, hist = False, kde = True,
+                 kde_kws = {'shade': True, 'linewidth': 3}, 
+                  label = pseudotime)
