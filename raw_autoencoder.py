@@ -51,9 +51,10 @@ def load_data(dataset):
         raise NotImplementedError("Unknown dataset {dataset}")
     
     return raw_Y, cpt
-        
+
+seed_value = 10        
 # Load data & Transform it to numpy
-dataset = "pc3" 
+dataset = "mb" 
 data, cpt = load_data(dataset)
 data = data.to_numpy()
 data = preprocessing.scale(data)
@@ -87,7 +88,7 @@ def logistic_unit(name, n, trans = True, reg_scale = 1e-2, reg_trans = 1e-2):
                                use_bias=trans,
                                kernel_regularizer=keras.regularizers.l2(reg_scale),
                                bias_regularizer=keras.regularizers.l2(reg_trans),
-                               kernel_initializer=keras.initializers.glorot_normal(seed=None),
+                               kernel_initializer=keras.initializers.glorot_normal(seed=seed_value),
                                bias_initializer=keras.initializers.Zeros()
                                )(x)
         x = keras.layers.Activation(name=name + '_out',
@@ -106,7 +107,7 @@ def linear_unit(name, n, trans = True, reg_scale = 1e-2, reg_trans = 1e-2):
                                use_bias=trans,
                                kernel_regularizer=keras.regularizers.l2(reg_scale),
                                bias_regularizer=keras.regularizers.l2(reg_trans),
-                               kernel_initializer=keras.initializers.glorot_normal(seed=None),
+                               kernel_initializer=keras.initializers.glorot_normal(seed=seed_value),
                                bias_initializer=keras.initializers.Zeros()
                                )(x)
         return x
@@ -116,11 +117,12 @@ def linear_unit(name, n, trans = True, reg_scale = 1e-2, reg_trans = 1e-2):
 def encoder(name , size , reg , drop , act = 'tanh'):
     
     def func(x):
-        for i, w in enumerate(size):
+        for i in range(len(size)):
+            w = size[i]
             x = keras.layers.Dense(name=name + str(i) + '_scale',
                                    units=w,
                                    kernel_regularizer=keras.regularizers.l2(reg),
-                                   kernel_initializer=keras.initializers.glorot_normal(seed=None),
+                                   kernel_initializer=keras.initializers.glorot_normal(seed=seed_value),
                                    )(x)
             if drop > 0:
                 x = keras.layers.Dropout(name=name + str(i) + '_dropout',
@@ -134,7 +136,7 @@ def encoder(name , size , reg , drop , act = 'tanh'):
                                units=1,
                                use_bias=False,
                                #kernel_regularizer=keras.regularizers.l2(reg),
-                               kernel_initializer=keras.initializers.glorot_normal(seed=None)
+                               kernel_initializer=keras.initializers.glorot_normal(seed=seed_value)
                                )(x)
         return x
 
@@ -148,7 +150,7 @@ def linear_bypass(name , n , reg):
                                units=n,
                                use_bias=False,
                                kernel_regularizer=keras.regularizers.l2(reg),
-                               kernel_initializer=keras.initializers.glorot_normal(seed=None)
+                               kernel_initializer=keras.initializers.glorot_normal(seed=seed_value)
                                )(x)
         return x
 
@@ -213,7 +215,7 @@ linear_reg = 1e-4
 
 
 y = keras.Input(shape=(input_width,), name='input')
-x = encoder('encoder', encoder_size, nonlinear_reg, dropout_rate, 'tanh')(y)
+x = encoder('encoder', encoder_size, nonlinear_reg, dropout_rate, 'selu')(y)
 
 chest = []
 if n_linear_bypass > 0:
@@ -247,6 +249,10 @@ correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_
 dis_score = correct_prob
 print("Score: ", dis_score)
 
+
+import cyclum.illustration
+color_map = {"g0/g1": "red", "s": "green", "g2/m": "blue"}
+cyclum.illustration.plot_round_distr_color(pseudotime[:, 0], cpt.squeeze(), color_map)
 ################################
 # DHLA 
 ###############################
@@ -258,7 +264,7 @@ data = preprocessing.scale(data)
 rate = 2e-4
 input_width = data.shape[1]
 encoder_depth = 2
-encoder_size = [30, 20]
+encoder_size = [300, 150, 50, 20]
 n_circular_unit= 2
 n_logistic_unit= 0
 n_linear_unit= 0
@@ -269,7 +275,7 @@ linear_reg = 1e-4
 
 
 y = keras.Input(shape=(input_width,), name='input')
-x = encoder('encoder', encoder_size, nonlinear_reg, dropout_rate, 'tanh')(y)
+x = encoder('encoder', encoder_size, nonlinear_reg, dropout_rate, 'selu')(y)
 
 chest = []
 if n_linear_bypass > 0:
@@ -289,3 +295,86 @@ model = keras.Model(outputs=y_hat, inputs=y)
 model.compile(loss='mean_squared_error',
                            optimizer=keras.optimizers.Adam(rate))
 model.fit(data, data, epochs=100, verbose=1)
+
+pseudotime = keras.backend.function(inputs=[model.get_layer('input').input],
+                                     outputs=[model.get_layer('encoder_out').output]
+                                     )([data])[0]
+
+flat_embedding = (pseudotime % (2 * np.pi)) / 2
+width = 3.14 / 100 / 2;
+discrete_time, distr_g0g1 = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='g0/g1', 0])
+discrete_time, distr_s = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='s', 0])
+discrete_time, distr_g2m = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='g2/m', 0])
+correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_g2m], cpt, ['g0/g1', 's', 'g2/m'])
+dis_score = correct_prob
+print("Score: ", dis_score)
+
+###########################
+# Hyperparameters tunning
+##########################
+import keras_tuner as kt
+
+def model_builder(hp):
+
+  w1 = hp.Int('units1', min_value=32, max_value=128, step=32)
+  w2 = hp.Int('units2', min_value=16, max_value=64, step=16)
+  w3 = hp.Int('units3', min_value=8, max_value=32, step=8)
+  w4 = hp.Int('units4', min_value=4, max_value=16, step=4)
+  rate = hp.Choice('learning_rate', values=[2e-4, 1e-3, 1e-4, 5e-4])
+  input_width = data.shape[1]
+  n_circular_unit= 2
+  n_logistic_unit= hp.Int('units1', min_value=0, max_value=3, step=1)
+  n_linear_unit= hp.Int('units1', min_value=0, max_value=3, step=1)
+  n_linear_bypass= 3
+  dropout_rate = hp.Choice('learning_rate', values=[0.05, 0.1, 0.2])
+  nonlinear_reg = 1e-4
+  linear_reg = 1e-4
+  y = keras.Input(shape=(input_width,), name='input')
+  x = encoder('encoder', [w1, w2, w3, w4], nonlinear_reg, dropout_rate, 'selu')(y)
+  chest = []
+  if n_linear_bypass > 0:
+      x_bypass = linear_bypass('bypass', n_linear_bypass, linear_reg)(y)
+      chest.append(x_bypass)
+  if n_logistic_unit > 0:
+      x_logistic = logistic_unit('logistic', n_logistic_unit)(x)
+      chest.append(x_logistic)
+  if n_linear_unit > 0:
+      x_linear = linear_unit('linear', n_linear_unit)(x)
+      chest.append(x_linear)
+  if n_circular_unit > 0:
+      x_circular = circular_unit('circular')(x)
+      chest.append(x_circular)
+  y_hat = decoder('decoder', input_width)(chest)
+  model = keras.Model(outputs=y_hat, inputs=y)
+  model.compile(loss='mean_squared_error',
+                             optimizer=keras.optimizers.Adam(rate),
+                             metrics=[
+                            tf.keras.metrics.MeanSquaredError(),
+                            ])
+  return model
+
+dataset = "mb" 
+data, cpt = load_data(dataset)
+data = data.to_numpy()
+data = preprocessing.scale(data)
+
+tuner = kt.Hyperband(hypermodel = model_builder,
+                     objective = kt.Objective("mean_squared_error", direction="min"),
+                     max_epochs = 100)
+tuner.search_space_summary() 
+tuner.search(data, data)
+best_hp=tuner.get_best_hyperparameters()[0]
+h_model = tuner.hypermodel.build(best_hp)
+h_model.summary()
+h_model.fit(data, data)
+pseudotime = keras.backend.function(inputs=[h_model.get_layer('input').input],
+                                     outputs=[h_model.get_layer('encoder_out').output]
+                                     )([data])[0]
+flat_embedding = (pseudotime % (2 * np.pi)) / 2
+width = 3.14 / 100 / 2;
+discrete_time, distr_g0g1 = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='g0/g1', 0])
+discrete_time, distr_s = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='s', 0])
+discrete_time, distr_g2m = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='g2/m', 0])
+correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_g2m], cpt, ['g0/g1', 's', 'g2/m'])
+dis_score = correct_prob
+print("Score: ", dis_score)
