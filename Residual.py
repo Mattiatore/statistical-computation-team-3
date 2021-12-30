@@ -67,7 +67,8 @@ def encoder(latent_dim, name = 'encoder', reg = 1e-2, size = [3, 3, 3], training
         relu = ReLU()(x)
         x = BatchNormalization()(relu)
         
-        for i, w in enumerate(size):
+        for i in range(len(size)):
+            w = size[i]
             x = residual_block(x, downsample=True, units=w)
         
         x = keras.layers.Dense(name=name + '_out',
@@ -86,8 +87,8 @@ def circular_unit(name, comp = 2):
         if comp < 2:
             raise ValueError("comp must be at least 2")
         elif comp == 2:
-            out = [keras.layers.Lambda(lambda x: keras.backend.sin(x), name=name + '_sin')(x),
-                   keras.layers.Lambda(lambda x: keras.backend.cos(x), name=name + '_cos')(x)]
+            out = [keras.layers.Lambda(lambda x: x+keras.backend.pow(keras.backend.sin(x), 2), name=name + '_sin')(x),
+                  keras.layers.Lambda(lambda x: x+keras.backend.pow(keras.backend.cos(x), 2), name=name + '_cos')(x)]
         else:
             out = [
                 keras.layers.Lambda(lambda x: keras.backend.sin(x + 2 * pi * i / comp), name=name + '_' + str(i))(x)
@@ -165,25 +166,26 @@ def decoder(name, n):
 
 
 
-def load_data(dataset):
+# DATA LOADING
+def load_data(dataset, filepath):
     if dataset == "H9":
         cell_line = "H9"
-        raw_Y = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/h9_df.pkl').T
-        cpt = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/h9_cpt.pkl').values
+        raw_Y = pd.read_pickle(filepath+'/h9_df.pkl').T
+        cpt = pd.read_pickle(filepath+'/h9_cpt.pkl').values
         print("DATASET: ", cell_line)
         print("Original dimesion %d cells x %d genes." % raw_Y.shape)
         print(f"G0/G1 {sum(cpt == 'g0/g1')}, S {sum(cpt == 's')}, G2/M {sum(cpt == 'g2/m')}")
     elif dataset == "mb":
         cell_line = "mb"
-        raw_Y = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/mb_df.pkl').T
-        cpt = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/mb_cpt.pkl').values
+        raw_Y = pd.read_pickle(filepath+'/mb_df.pkl').T
+        cpt = pd.read_pickle(filepath+'/mb_cpt.pkl').values
         print("DATASET: ", cell_line)
         print("Original dimesion %d cells x %d genes." % raw_Y.shape)
         print(f"G0/G1 {sum(cpt == 'g0/g1')}, S {sum(cpt == 's')}, G2/M {sum(cpt == 'g2/m')}")
     elif dataset == "pc3":
         cell_line = "pc3"
-        raw_Y = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/pc3_df.pkl').T
-        cpt = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/pc3_cpt.pkl').values
+        raw_Y = pd.read_pickle(filepath+'/pc3_df.pkl').T
+        cpt = pd.read_pickle(filepath+'/pc3_cpt.pkl').values
         print("DATASET: ", cell_line)
         print("Original dimesion %d cells x %d genes." % raw_Y.shape)
         print(f"G0/G1 {sum(cpt == 'g0/g1')}, S {sum(cpt == 's')}, G2/M {sum(cpt == 'g2/m')}")
@@ -191,22 +193,23 @@ def load_data(dataset):
         raise NotImplementedError("Unknown dataset {dataset}")
     
     return raw_Y, cpt
-        
-# Load data & Transform it to numpy
-dataset = "mb" 
-data, cpt = load_data(dataset)
+
+# transforming the data
+dataset = "pc3" 
+filepath = '/Statistical_computation/project4/data/McDavid'
+data, cpt = load_data(dataset, filepath)
 data = data.to_numpy()
 data = preprocessing.scale(data)
 
 
 
-rate = 2e-4
+rate = 2e-3
 input_width = data.shape[1]
 encoder_depth = 2
 encoder_size = [30, 20]
 n_circular_unit= 2
 n_logistic_unit= 0
-n_linear_unit= 0
+n_linear_unit= 2
 n_linear_bypass= 3
 dropout_rate = 0
 nonlinear_reg = 1e-4
@@ -214,7 +217,9 @@ linear_reg = 1e-4
 
 
 y = keras.Input(shape=(input_width,), name='input')
-x = encoder(name = 'encoder', reg = 1e-4, latent_dim = 1, size = [240, 120, 60, 30, 20, 10, 5, 3], training = True, dropout_rate = 0.1)(y)
+#x = encoder(name = 'encoder', reg = 1e-4, latent_dim = 1, size = [64, 32, 16, 16, 12], training = True, dropout_rate = 0.1)(y)
+x = encoder(name = 'encoder', reg = 1e-3, latent_dim = 1, size = [32,  16, 8, 4, 2], training = True, dropout_rate = 0.05)(y)
+
 
 chest = []
 if n_linear_bypass > 0:
@@ -233,12 +238,138 @@ y_hat = decoder('decoder', input_width)(chest)
 model = keras.Model(outputs=y_hat, inputs=y)
 model.compile(loss='mean_squared_error',
                            optimizer=keras.optimizers.Adam(rate))
-model.fit(data, data, epochs=500, verbose=1)
+
+my_callbacks = [
+    tf.keras.callbacks.TensorBoard(log_dir='./logs', write_grads = True)
+]
+model.fit(data, data, epochs=500, verbose=1, callbacks=my_callbacks)
 
 pseudotime = keras.backend.function(inputs=[model.get_layer('input').input],
                                      outputs=[model.get_layer('encoder_out').output]
                                      )([data])[0]
 
+flat_embedding = (pseudotime % (2 * np.pi)) / 2
+width = 3.14 / 100 / 2;
+discrete_time, distr_g0g1 = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='g0/g1', 0])
+discrete_time, distr_s = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='s', 0])
+discrete_time, distr_g2m = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='g2/m', 0])
+correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_g2m], cpt, ['g0/g1', 's', 'g2/m'])
+dis_score = correct_prob
+print("Score: ", dis_score)
+
+##################
+# CHLA9
+##################
+data = pd.read_csv(filepath+"/Statistical_computation/project4/final_dataset.csv")
+data = data.iloc[: , 1:]
+data = data.to_numpy()
+data = preprocessing.scale(data)
+
+rate = 5e-4
+input_width = data.shape[1]
+n_circular_unit= 2
+n_logistic_unit= 2
+n_linear_unit=  3
+n_linear_bypass= 5
+dropout_rate = 0.1
+nonlinear_reg = 1e-4
+linear_reg = 1e-4
+
+y = keras.Input(shape=(input_width,), name='input')
+x = encoder(name = 'encoder', reg = 1e-4, latent_dim = 1, size = [2000, 960, 480, 240, 120, 60, 30, 20, 10, 5, 3], training = True, dropout_rate = 0.1)(y)
+
+chest = []
+if n_linear_bypass > 0:
+    x_bypass = linear_bypass('bypass', n_linear_bypass, linear_reg)(y)
+    chest.append(x_bypass)
+if n_logistic_unit > 0:
+    x_logistic = logistic_unit('logistic', n_logistic_unit)(x)
+    chest.append(x_logistic)
+if n_linear_unit > 0:
+    x_linear = linear_unit('linear', n_linear_unit)(x)
+    chest.append(x_linear)
+if n_circular_unit > 0:
+    x_circular = circular_unit('circular')(x)
+    chest.append(x_circular)
+y_hat = decoder('decoder', input_width)(chest)
+model = keras.Model(outputs=y_hat, inputs=y)
+model.compile(loss='mean_squared_error',
+                           optimizer=keras.optimizers.Adam(rate))
+model.fit(data, data, epochs=30, verbose=1)
+
+pseudotime = keras.backend.function(inputs=[model.get_layer('input').input],
+                                     outputs=[model.get_layer('encoder_out').output]
+                                     )([data])[0]
+
+pseudotime = (pseudotime % (2 * np.pi)) / 2
+label = np.array([0 for p in pseudotime if p > 2.5] )
+import seaborn as sns
+sns.distplot(pseudotime, hist = False, kde = True,
+                 kde_kws = {'shade': True, 'linewidth': 3}, 
+                  label = pseudotime)
+
+
+################
+# Hyperparameters
+################
+import keras_tuner as kt
+import tensorflow as tf
+
+def model_builder(hp):
+
+  units = hp.Choice('units', values=[2, 3, 4, 5, 6, 7])
+  w = np.array([2**u for u in range(units)])
+  rate = hp.Choice('learning_rate', values=[2e-4, 1e-3, 1e-4, 5e-4])
+  input_width = data.shape[1]
+  n_circular_unit= 2
+  n_logistic_unit= hp.Int('logistic', min_value=0, max_value=3, step=1)
+  n_linear_unit= hp.Int('linear', min_value=0, max_value=3, step=1)
+  n_linear_bypass= 3
+  dropout_rate = hp.Choice('rate', values=[0.05, 0.1, 0.2])
+  nonlinear_reg = 1e-4
+  linear_reg = 1e-4
+  y = keras.Input(shape=(input_width,), name='input')
+  x = encoder(name = 'encoder', reg = 1e-4, latent_dim = 1, size = w, training = True, dropout_rate = dropout_rate)(y)
+
+  chest = []
+  if n_linear_bypass > 0:
+      x_bypass = linear_bypass('bypass', n_linear_bypass, linear_reg)(y)
+      chest.append(x_bypass)
+  if n_logistic_unit > 0:
+      x_logistic = logistic_unit('logistic', n_logistic_unit)(x)
+      chest.append(x_logistic)
+  if n_linear_unit > 0:
+      x_linear = linear_unit('linear', n_linear_unit)(x)
+      chest.append(x_linear)
+  if n_circular_unit > 0:
+      x_circular = circular_unit('circular')(x)
+      chest.append(x_circular)
+  y_hat = decoder('decoder', input_width)(chest)
+  model = keras.Model(outputs=y_hat, inputs=y)
+  model.compile(loss='mean_squared_error',
+                              optimizer=keras.optimizers.Adam(rate),
+                              metrics=[
+                            tf.keras.metrics.MeanSquaredError(),
+                            ])
+  return model
+
+dataset = "mb" 
+data, cpt = load_data(dataset, filepath)
+data = data.to_numpy()
+data = preprocessing.scale(data)
+
+tuner = kt.Hyperband(hypermodel = model_builder,
+                      objective = kt.Objective("mean_squared_error", direction="min"),
+                      max_epochs = 1000)
+tuner.search_space_summary() 
+tuner.search(data, data)
+best_hp=tuner.get_best_hyperparameters()[0]
+h_model = tuner.hypermodel.build(best_hp)
+h_model.summary()
+h_model.fit(data, data)
+pseudotime = keras.backend.function(inputs=[h_model.get_layer('input').input],
+                                      outputs=[h_model.get_layer('encoder_out').output]
+                                      )([data])[0]
 flat_embedding = (pseudotime % (2 * np.pi)) / 2
 width = 3.14 / 100 / 2;
 discrete_time, distr_g0g1 = cyclum.evaluation.periodic_parzen_estimate(flat_embedding[np.squeeze(cpt)=='g0/g1', 0])
