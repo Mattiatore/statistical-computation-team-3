@@ -17,29 +17,30 @@ from keras.layers import concatenate
 from sklearn.model_selection import train_test_split
 import cyclum.models
 import cyclum.evaluation
+import cyclum.illustration
 ################
 # Preprocessing
 ################
 
-def load_data(dataset):
+ddef load_data(dataset, filepath):
     if dataset == "H9":
         cell_line = "H9"
-        raw_Y = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/h9_df.pkl').T
-        cpt = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/h9_cpt.pkl').values
+        raw_Y = pd.read_pickle(filepath+'/h9_df.pkl').T
+        cpt = pd.read_pickle(filepath+'/h9_cpt.pkl').values
         print("DATASET: ", cell_line)
         print("Original dimesion %d cells x %d genes." % raw_Y.shape)
         print(f"G0/G1 {sum(cpt == 'g0/g1')}, S {sum(cpt == 's')}, G2/M {sum(cpt == 'g2/m')}")
     elif dataset == "mb":
         cell_line = "mb"
-        raw_Y = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/mb_df.pkl').T
-        cpt = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/mb_cpt.pkl').values
+        raw_Y = pd.read_pickle(filepath+'/mb_df.pkl').T
+        cpt = pd.read_pickle(filepath+'/mb_cpt.pkl').values
         print("DATASET: ", cell_line)
         print("Original dimesion %d cells x %d genes." % raw_Y.shape)
         print(f"G0/G1 {sum(cpt == 'g0/g1')}, S {sum(cpt == 's')}, G2/M {sum(cpt == 'g2/m')}")
     elif dataset == "pc3":
         cell_line = "pc3"
-        raw_Y = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/pc3_df.pkl').T
-        cpt = pd.read_pickle('/home/pau/Desktop/MASTER/Statistical_computation/project4/data/McDavid/pc3_cpt.pkl').values
+        raw_Y = pd.read_pickle(filepath+'/pc3_df.pkl').T
+        cpt = pd.read_pickle(filepath+'/pc3_cpt.pkl').values
         print("DATASET: ", cell_line)
         print("Original dimesion %d cells x %d genes." % raw_Y.shape)
         print(f"G0/G1 {sum(cpt == 'g0/g1')}, S {sum(cpt == 's')}, G2/M {sum(cpt == 'g2/m')}")
@@ -47,12 +48,13 @@ def load_data(dataset):
         raise NotImplementedError("Unknown dataset {dataset}")
     
     return raw_Y, cpt
-        
-# Load data & Transform it to numpy
+
+
 dataset = "H9" 
-data, cpt = load_data(dataset)
+filepath = '/Statistical_computation/project4/data/McDavid'
+data, cpt = load_data(dataset, filepath)
 data = data.to_numpy()
-data = preprocessing.scale(data)
+seed_value = 10        
 
 # Train (H9)
 model = cyclum.tuning.CyclumAutoTune(data, max_linear_dims=3, 
@@ -64,11 +66,11 @@ model = cyclum.models.AutoEncoder(input_width=data.shape[1],
                                   encoder_depth=2,
                                  n_circular_unit=2,
                                  n_logistic_unit=0,
-                                 n_linear_unit=0,
+                                 n_linear_unit=2,
                                  n_linear_bypass=3,
                                  dropout_rate=0.1)
 
-model.train(data, epochs=1000, verbose=100, rate=2e-4)
+model.train(data, epochs=2000, verbose=100, rate=2e-4)
 pseudotime = model.predict_pseudotime(data)
 flat_embedding = (pseudotime % (2 * np.pi)) / 2
 width = 3.14 / 100 / 2;
@@ -79,6 +81,9 @@ correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_
 dis_score = correct_prob
 print("Score Cyclum: ", dis_score)
 
+
+color_map = {"g0/g1": "red", "s": "green", "g2/m": "blue"}
+cyclum.illustration.plot_round_distr_color(pseudotime[:, 0], cpt.squeeze(), color_map)
 # MB
 dataset = "mb" 
 data, cpt = load_data(dataset)
@@ -98,6 +103,10 @@ discrete_time, distr_g2m = cyclum.evaluation.periodic_parzen_estimate(flat_embed
 correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_g2m], cpt, ['g0/g1', 's', 'g2/m'])
 dis_score = correct_prob
 print("Score Cyclum: ", dis_score)
+
+pseudotime = (pseudotime % (2 * np.pi)) / 2
+color_map = {"g0/g1": "red", "s": "green", "g2/m": "blue"}
+cyclum.illustration.plot_round_distr_color(pseudotime[:, 0], cpt.squeeze(), color_map)
 
 # PC3
 dataset = "pc3" 
@@ -128,7 +137,7 @@ correct_prob = cyclum.evaluation.precision_estimate([distr_g0g1, distr_s, distr_
 dis_score = correct_prob
 print("Score Cyclum: ", dis_score)
 
-import cyclum.illustration
+pseudotime = (pseudotime % (2 * np.pi)) / 2
 color_map = {"g0/g1": "red", "s": "green", "g2/m": "blue"}
 cyclum.illustration.plot_round_distr_color(pseudotime[:, 0], cpt.squeeze(), color_map)
 
@@ -136,7 +145,7 @@ cyclum.illustration.plot_round_distr_color(pseudotime[:, 0], cpt.squeeze(), colo
 #####################
 # CHLA 9
 ##################
-data = pd.read_csv("/home/pau/Desktop/MASTER/Statistical_computation/project4/final_dataset.csv")
+data = pd.read_csv(filepath+"/Statistical_computation/project4/final_dataset.csv")
 data = data.iloc[: , 1:]
 data = data.to_numpy()
 data = preprocessing.scale(data)
@@ -149,7 +158,7 @@ model = cyclum.models.AutoEncoder(input_width=data.shape[1],
                                   n_linear_unit=5,
                                   n_linear_bypass=3,
                                   dropout_rate=0.1)
-model.train(data, epochs=20, verbose=10, rate=2e-4)
+model.train(data, epochs=100, verbose=10, rate=2e-4)
 
 
 pseudotime = model.predict_pseudotime(data)
@@ -160,3 +169,46 @@ import seaborn as sns
 sns.distplot(pseudotime, hist = False, kde = True,
                  kde_kws = {'shade': True, 'linewidth': 3}, 
                   label = pseudotime)
+
+# Hyperparameters tunning
+#########################################################
+def objective(params):
+    rate = params['rate']
+    input_width = data.shape[1]
+    depth = params['depth']
+    n_circular_unit= 2
+    n_logistic_unit= 0
+    n_linear_unit= params['linear']
+    n_linear_bypass= 3
+    drop = params['drop']
+    nonlinear_reg = 1e-4
+    linear_reg = 1e-4   
+    w = [2**u for u in range(depth)]
+
+    model = cyclum.models.AutoEncoder(input_width=data.shape[1],
+                                      encoder_width=w, 
+                                      encoder_depth=len(w),
+                                      n_circular_unit=2,
+                                      n_logistic_unit=0,
+                                      n_linear_unit=n_linear_unit,
+                                      n_linear_bypass=3,
+                                     dropout_rate=drop)
+    
+    mod = model.train(data, epochs=10, verbose=10, rate=rate)
+    cost = np.mean(mod.history['loss'])   
+    return cost
+
+from hyperopt import fmin, tpe, hp
+
+
+space = dict([('rate',  hp.choice('rate', [1e-5, 1e-4, 4e-4, 1e-3])),
+                    ('depth', hp.choice('depth', range(7, 14, 1))),
+                    ('linear', hp.choice('linear', range(2, 6, 1))),                  
+                    ('drop', hp.choice('drop', [0.15, 0.2, 0.05, 0.1]))
+                    ])
+
+best = fmin(fn=objective,
+    space=space,
+    algo=tpe.suggest,
+    max_evals=30)
+
