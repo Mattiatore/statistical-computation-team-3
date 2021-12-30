@@ -256,7 +256,7 @@ print("Score: ", dis_score)
 ################################
 # DHLA 
 ###############################
-data = pd.read_csv("/home/pau/Desktop/MASTER/Statistical_computation/project4/final_dataset.csv")
+data = pd.read_csv(filepath+"/Statistical_computation/project4/final_dataset.csv")
 data = data.iloc[: , 1:]
 data = data.to_numpy()
 data = preprocessing.scale(data)
